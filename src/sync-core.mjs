@@ -52,7 +52,7 @@ async function getCalendarConfig() {
 // … (slugify, buildHandle, toFields, setActive, etc. como ya tienes)
 
 export async function runSync() {
-  // 1) Config dinámica
+
   const cfg = await getCalendarConfig();
   const ICS_URL = cfg.ics || ENV_ICS;
   const LOOKAHEAD_DAYS = cfg.lookahead;
@@ -62,12 +62,29 @@ export async function runSync() {
   console.log('→ Usando ICS:', ICS_URL);
   console.log('→ Lookahead días:', LOOKAHEAD_DAYS);
 
-  // 2) Leer y parsear ICS
-  const parsed = await ical.async.fromURL(ICS_URL);
 
-  // 3) Resto de tu lógica tal cual:
-  //   - expandir recurrencias
-  //   - filtrar futuros o en curso
-  //   - upsert metaobjects `event` + set ACTIVE
-  // (usa tu versión actual con slugify y activación)
+  const parsed = await ical.async.fromURL(ICS_URL);
+  console.log('🏬 Tienda destino:', process.env.SHOP);
+
+    console.log('→ Descargando ICS:', ICS_URL);
+    const icsUrl = ICS_URL + (ICS_URL.includes('?') ? '&' : '?') + 't=' + Date.now();
+    const parsed = await ical.async.fromURL(icsUrl);
+
+    const vevents = Object.values(parsed).filter(e => e.type === 'VEVENT');
+    console.log('📄 Eventos en ICS:', vevents.length);
+
+    // Expansión RRULE → occ
+    console.log('🧮 Ocurrencias después de RRULE:', occ.length);
+
+    // Filtrado por fecha
+    console.log('🎯 Eventos en ventana:', list.length);
+
+    // Log de los títulos para ver qué va a insertar
+    list.forEach(ev => {
+    console.log(`   - ${ev.summary} (${ev.start.toISOString()} → ${ev.end.toISOString()})`);
+    });
+
+    // Después del bucle de upsert
+    console.log(`✓ Finalizado: ${count} eventos sincronizados`);
+
 }
