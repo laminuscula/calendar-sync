@@ -5,7 +5,7 @@ import ical from 'node-ical';
 const shopDomain = process.env.SHOPIFY_STORE_DOMAIN;
 const accessToken = process.env.SHOPIFY_ADMIN_TOKEN;
 const API_VERSION = '2024-07';
-const META_TYPE = 'evento';
+const META_TYPE = 'event';
 
 async function shopifyGraphQL(query, variables = {}) {
   const res = await fetch(`https://${shopDomain}/admin/api/${API_VERSION}/graphql.json`, {
