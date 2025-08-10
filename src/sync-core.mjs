@@ -114,9 +114,9 @@ export async function runSync() {
       { key: 'title', value: ev.title || '' },
       { key: 'location', value: ev.location || '' },
       { key: 'description', value: ev.description || '' },
-      { key: 'start', value: ev.start }
+      { key: 'start_date', value: ev.start }
     ];
-    if (ev.end) fields.push({ key: 'end', value: ev.end });
+    if (ev.end) fields.push({ key: 'end_date', value: ev.end });
 
     const existingId = currentMap.get(ev.handle);
     if (existingId) {
