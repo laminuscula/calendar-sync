@@ -1,0 +1,21 @@
+{
+  "name": "calendar-sync",
+  "version": "1.0.0",
+  "description": "",
+  "type": "module",
+  "main": "src/sync.mjs",
+  "scripts": {
+    "sync": "node src/sync.mjs",
+    "check": "node -e \"console.log(process.version)\"",
+    "start": "node src/server.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^4.2.1",
+    "node-ical": "^0.16.0"
+  }
+}
