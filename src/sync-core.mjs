@@ -25,17 +25,25 @@ async function shopifyGraphQL(query, variables = {}) {
 export async function runSync() {
   console.log('Iniciando sincronización');
 
-  const configData = await shopifyGraphQL(`
-    {
-      metaobject(id: "gid://shopify/Metaobject/${process.env.CALENDAR_CONFIG_ID}") {
-        field(key: "ics_url") { value }
-        field(key: "lookahead_days") { value }
+  const configData = await shopifyGraphQL(
+    `
+    query Config($id: ID!) {
+      metaobject(id: $id) {
+        ics_url: field(key: "ics_url") { value }
+        lookahead_days: field(key: "lookahead_days") { value }
       }
     }
-  `);
+    `,
+    { id: `gid://shopify/Metaobject/${process.env.CALENDAR_CONFIG_ID}` }
+  );
 
-  const icsUrl = configData.metaobject.field[0].value;
-  const lookaheadDays = parseInt(configData.metaobject.field[1].value, 10) || 180;
+  const icsUrl =
+    configData?.metaobject?.ics_url?.value || process.env.ICS_URL || null;
+  const lookaheadDays = parseInt(
+    configData?.metaobject?.lookahead_days?.value || process.env.LOOKAHEAD_DAYS || '180',
+    10
+  );
+
   console.log('Config ICS:', icsUrl);
   console.log('Lookahead días:', lookaheadDays);
 
@@ -59,13 +67,17 @@ export async function runSync() {
   const vevents = Object.values(parsed).filter(ev => ev.type === 'VEVENT');
 
   const now = new Date();
-  const cutoff = new Date();
-  cutoff.setDate(now.getDate() + lookaheadDays);
+  const futureLimit = new Date();
+  futureLimit.setDate(futureLimit.getDate() + lookaheadDays);
 
   const occ = vevents
-    .filter(ev => ev.start && ev.start >= now && ev.start <= cutoff)
+    .filter(ev => {
+      const startDate = ev.start instanceof Date ? ev.start : new Date(ev.start);
+      return startDate >= now && startDate <= futureLimit;
+    })
     .map(ev => {
-      const handle = (ev.uid && String(ev.uid)) ||
+      const handle =
+        (ev.uid && String(ev.uid)) ||
         (ev.summary || '')
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
@@ -76,8 +88,8 @@ export async function runSync() {
         title: ev.summary || '',
         location: ev.location || '',
         description: ev.description || '',
-        start_date: ev.start ? new Date(ev.start).toISOString() : null,
-        end_date: ev.end ? new Date(ev.end).toISOString() : null
+        start_date: ev.start ? new Date(ev.start).toISOString() : '',
+        end_date: ev.end ? new Date(ev.end).toISOString() : ''
       };
     });
 
@@ -85,9 +97,11 @@ export async function runSync() {
   console.log('Eventos a procesar:', occ.length);
 
   for (const ev of occ) {
+    console.log('Procesando evento:', ev.title);
     if (currentHandles.includes(ev.handle)) {
+      console.log('Actualizando evento existente:', ev.handle);
       await shopifyGraphQL(`
-        mutation UpdateEvent($handle: String!, $title: String!, $location: String!, $description: String!, $start_date: String, $end_date: String) {
+        mutation UpdateEvent($handle: String!, $title: String!, $location: String!, $description: String!, $start_date: String!, $end_date: String!) {
           metaobjectUpdate(handle: $handle, type: "event", metaobject: {
             status: ACTIVE,
             fields: [
@@ -104,8 +118,9 @@ export async function runSync() {
         }
       `, ev);
     } else {
+      console.log('Creando evento nuevo:', ev.handle);
       await shopifyGraphQL(`
-        mutation CreateEvent($handle: String!, $title: String!, $location: String!, $description: String!, $start_date: String, $end_date: String) {
+        mutation CreateEvent($handle: String!, $title: String!, $location: String!, $description: String!, $start_date: String!, $end_date: String!) {
           metaobjectCreate(metaobject: {
             type: "event",
             handle: $handle,
@@ -129,6 +144,7 @@ export async function runSync() {
   const toDelete = currentHandles.filter(h => !newHandles.includes(h));
   console.log('Eventos a borrar:', toDelete.length);
   for (const handle of toDelete) {
+    console.log('Borrando evento:', handle);
     await shopifyGraphQL(`
       mutation DeleteEvent($handle: String!) {
         metaobjectDelete(handle: $handle, type: "event") {
