@@ -63,7 +63,7 @@ export async function runSync() {
   console.log('→ Lookahead días:', LOOKAHEAD_DAYS);
 
 
-  const parsed = await ical.async.fromURL(ICS_URL);
+
   console.log('🏬 Tienda destino:', process.env.SHOP);
 
     console.log('→ Descargando ICS:', ICS_URL);
