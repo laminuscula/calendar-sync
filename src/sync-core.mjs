@@ -1,3 +1,4 @@
+// src/sync-core.mjs
 import 'dotenv/config';
 import ical from 'node-ical';
 
@@ -9,10 +10,7 @@ const META_TYPE = 'evento';
 async function shopifyGraphQL(query, variables = {}) {
   const res = await fetch(`https://${shopDomain}/admin/api/${API_VERSION}/graphql.json`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': accessToken
-    },
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': accessToken },
     body: JSON.stringify({ query, variables })
   });
   const json = await res.json();
@@ -41,32 +39,31 @@ async function getCalendarConfig() {
       lookahead: Number(node?.lookahead_days?.value || process.env.LOOKAHEAD_DAYS || 180)
     };
   } catch {
-    return {
-      ics: process.env.ICS_URL || null,
-      lookahead: Number(process.env.LOOKAHEAD_DAYS || 180)
-    };
+    return { ics: process.env.ICS_URL || null, lookahead: Number(process.env.LOOKAHEAD_DAYS || 180) };
   }
 }
 
 const MUT_CREATE = `
 mutation Create($handle:String!, $fields:[MetaobjectFieldInput!]!) {
-  metaobjectCreate(metaobject:{
-    type:"${META_TYPE}",
-    handle:$handle,
-    fields:$fields
-  }){
-    metaobject{ id }
-    userErrors{ field message }
+  metaobjectCreate(metaobject:{ type:"${META_TYPE}", handle:$handle, fields:$fields }) {
+    metaobject{ id handle }
+    userErrors{ field message code }
   }
 }`;
 
 const MUT_UPDATE = `
-mutation Update($handle:String!, $fields:[MetaobjectFieldInput!]!) {
-  metaobjectUpdate(handle:$handle, type:"${META_TYPE}", metaobject:{
-    fields:$fields
-  }){
-    metaobject{ id }
-    userErrors{ field message }
+mutation Update($id:ID!, $fields:[MetaobjectFieldInput!]!) {
+  metaobjectUpdate(id:$id, metaobject:{ fields:$fields }) {
+    metaobject{ id handle }
+    userErrors{ field message code }
+  }
+}`;
+
+const MUT_DELETE = `
+mutation Del($id:ID!) {
+  metaobjectDelete(id:$id) {
+    deletedId
+    userErrors{ field message code }
   }
 }`;
 
@@ -81,12 +78,13 @@ export async function runSync() {
   const current = await shopifyGraphQL(`
     { metaobjects(type:"${META_TYPE}", first:250) { edges { node { id handle } } } }
   `);
-  const currentHandles = current.metaobjects.edges.map(e => e.node.handle);
-  console.log('Eventos actuales en Shopify:', currentHandles.length);
+  const currentNodes = current.metaobjects.edges.map(e => e.node);
+  const currentMap = new Map(currentNodes.map(n => [n.handle, n.id]));
+  console.log('Eventos actuales en Shopify:', currentNodes.length);
 
-  const cacheBusted = cfg.ics + (cfg.ics.includes('?') ? '&' : '?') + 't=' + Date.now();
+  const icsUrl = cfg.ics + (cfg.ics.includes('?') ? '&' : '?') + 't=' + Date.now();
   console.log('Descargando feed ICS');
-  const parsed = await ical.async.fromURL(cacheBusted);
+  const parsed = await ical.async.fromURL(icsUrl);
   const vevents = Object.values(parsed).filter(ev => ev && ev.type === 'VEVENT');
   console.log('Eventos en el feed ICS:', vevents.length);
 
@@ -120,24 +118,24 @@ export async function runSync() {
     ];
     if (ev.end) fields.push({ key: 'end', value: ev.end });
 
-    if (currentHandles.includes(ev.handle)) {
-      await shopifyGraphQL(MUT_UPDATE, { handle: ev.handle, fields });
+    const existingId = currentMap.get(ev.handle);
+    if (existingId) {
+      const out = await shopifyGraphQL(MUT_UPDATE, { id: existingId, fields });
+      const errs = out?.metaobjectUpdate?.userErrors || [];
+      if (errs.length) throw new Error('userErrors update: ' + JSON.stringify(errs));
     } else {
-      await shopifyGraphQL(MUT_CREATE, { handle: ev.handle, fields });
+      const out = await shopifyGraphQL(MUT_CREATE, { handle: ev.handle, fields });
+      const errs = out?.metaobjectCreate?.userErrors || [];
+      if (errs.length) throw new Error('userErrors create: ' + JSON.stringify(errs));
     }
   }
 
-  const toDelete = currentHandles.filter(h => !newHandles.includes(h));
+  const toDelete = currentNodes.filter(n => !newHandles.includes(n.handle));
   console.log('Eventos a borrar:', toDelete.length);
-  for (const handle of toDelete) {
-    await shopifyGraphQL(`
-      mutation Del($handle:String!){
-        metaobjectDelete(handle:$handle, type:"${META_TYPE}"){
-          deletedId
-          userErrors{ field message }
-        }
-      }
-    `, { handle });
+  for (const n of toDelete) {
+    const out = await shopifyGraphQL(MUT_DELETE, { id: n.id });
+    const errs = out?.metaobjectDelete?.userErrors || [];
+    if (errs.length) throw new Error('userErrors delete: ' + JSON.stringify(errs));
   }
 
   console.log('Sincronización completada');
