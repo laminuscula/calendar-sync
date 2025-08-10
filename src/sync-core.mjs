@@ -89,20 +89,27 @@ export async function runSync() {
   console.log('Eventos en el feed ICS:', vevents.length);
 
   const occ = vevents.map(ev => {
-    const handle =
-      (ev.uid && String(ev.uid)) ||
-      (ev.summary || '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 60);
+    const handle = ev.uid
+  ? String(ev.uid)
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60)
+  : (ev.summary || '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60);
+
     return {
-      handle,
-      title: ev.summary || '',
-      location: ev.location || '',
-      description: ev.description || '',
-      start: ev.start ? new Date(ev.start).toISOString() : null,
-      end: ev.end ? new Date(ev.end).toISOString() : null
+    handle,
+    title: ev.summary || '',
+    location: ev.location || '',
+    description: ev.description || '',
+    start: ev.start ? new Date(ev.start).toISOString() : null,
+    end: ev.end ? new Date(ev.end).toISOString() : null
     };
   }).filter(e => e.handle && e.start);
 
