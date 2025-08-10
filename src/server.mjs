@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 
 // Seguridad sencilla: HMAC en query ?hmac=...
 function verifyHmac(req) {
-  const secret = process.env.SYNC_SECRET || '';
+  const secret = process.env.HMAC_SECRET || '';
   const hmac = req.query.hmac || '';
   const base = 'sync'; // mensaje fijo
   const calc = crypto.createHmac('sha256', secret).update(base).digest('hex');
