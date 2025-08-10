@@ -48,8 +48,31 @@ async function getCalendarConfig() {
   }
 }
 
+const MUT_CREATE = `
+mutation Create($handle:String!, $fields:[MetaobjectFieldInput!]!) {
+  metaobjectCreate(metaobject:{
+    type:"${META_TYPE}",
+    handle:$handle,
+    fields:$fields
+  }){
+    metaobject{ id }
+    userErrors{ field message }
+  }
+}`;
+
+const MUT_UPDATE = `
+mutation Update($handle:String!, $fields:[MetaobjectFieldInput!]!) {
+  metaobjectUpdate(handle:$handle, type:"${META_TYPE}", metaobject:{
+    fields:$fields
+  }){
+    metaobject{ id }
+    userErrors{ field message }
+  }
+}`;
+
 export async function runSync() {
   console.log('Iniciando sincronización');
+
   const cfg = await getCalendarConfig();
   if (!cfg.ics) throw new Error('ICS_URL no está configurado (metaobjeto calendar_config o env)');
   console.log('Config ICS:', cfg.ics);
@@ -68,7 +91,13 @@ export async function runSync() {
   console.log('Eventos en el feed ICS:', vevents.length);
 
   const occ = vevents.map(ev => {
-    const handle = (ev.uid && String(ev.uid)) || (ev.summary || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0,60);
+    const handle =
+      (ev.uid && String(ev.uid)) ||
+      (ev.summary || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 60);
     return {
       handle,
       title: ev.summary || '',
@@ -78,46 +107,23 @@ export async function runSync() {
       end: ev.end ? new Date(ev.end).toISOString() : null
     };
   }).filter(e => e.handle && e.start);
+
   const newHandles = occ.map(e => e.handle);
   console.log('Eventos a procesar:', occ.length);
 
   for (const ev of occ) {
+    const fields = [
+      { key: 'title', value: ev.title || '' },
+      { key: 'location', value: ev.location || '' },
+      { key: 'description', value: ev.description || '' },
+      { key: 'start', value: ev.start }
+    ];
+    if (ev.end) fields.push({ key: 'end', value: ev.end });
+
     if (currentHandles.includes(ev.handle)) {
-      await shopifyGraphQL(`
-        mutation Update($handle:String!,$title:String!,$location:String!,$description:String!,$start:String!,$end:String) {
-          metaobjectUpdate(handle:$handle, type:"${META_TYPE}", metaobject:{
-            fields:[
-              {key:"title", value:$title},
-              {key:"location", value:$location},
-              {key:"description", value:$description},
-              {key:"start", value:$start},
-              {key:"end", value:$end}
-            ]
-          }){
-            metaobject{id}
-            userErrors{field message}
-          }
-        }
-      `, ev);
+      await shopifyGraphQL(MUT_UPDATE, { handle: ev.handle, fields });
     } else {
-      await shopifyGraphQL(`
-        mutation Create($handle:String!,$title:String!,$location:String!,$description:String!,$start:String!,$end:String) {
-          metaobjectCreate(metaobject:{
-            type:"${META_TYPE}",
-            handle:$handle,
-            fields:[
-              {key:"title", value:$title},
-              {key:"location", value:$location},
-              {key:"description", value:$description},
-              {key:"start", value:$start},
-              {key:"end", value:$end}
-            ]
-          }){
-            metaobject{id}
-            userErrors{field message}
-          }
-        }
-      `, ev);
+      await shopifyGraphQL(MUT_CREATE, { handle: ev.handle, fields });
     }
   }
 
@@ -128,7 +134,7 @@ export async function runSync() {
       mutation Del($handle:String!){
         metaobjectDelete(handle:$handle, type:"${META_TYPE}"){
           deletedId
-          userErrors{field message}
+          userErrors{ field message }
         }
       }
     `, { handle });
