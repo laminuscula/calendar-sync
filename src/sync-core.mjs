@@ -9,7 +9,7 @@ const META_TYPE = 'event';
 async function shopifyGraphQL(query, variables = {}) {
   const res = await fetch(shopifyEndpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Access-Token': shopifyToken, 'X-Shopify-Access-Token': shopifyToken },
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': shopifyToken },
     body: JSON.stringify({ query, variables })
   });
   const json = await res.json();
@@ -21,12 +21,26 @@ async function shopifyGraphQL(query, variables = {}) {
 }
 
 function toHandle(str) {
-  return (str || 'evento')
+  const base = (str || 'evento')
     .toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
+    .replace(/^-+|-+$/g, '');
+  return base ? base.slice(0, 60) : 'evento';
+}
+
+function uniqueHandleFor(ev, seen) {
+  // seen: Set with handles already assigned in this sync pass
+  const base = toHandle(ev.uid ? String(ev.uid) : (ev.summary || 'evento'));
+  let handle = base;
+  if (seen.has(handle)) {
+    const ts = ev.start ? new Date(ev.start) : new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const stamp = `${ts.getUTCFullYear()}${pad(ts.getUTCMonth()+1)}${pad(ts.getUTCDate())}${pad(ts.getUTCHours())}${pad(ts.getUTCMinutes())}`;
+    handle = `${base}-${stamp}`.slice(0, 60);
+  }
+  seen.add(handle);
+  return handle;
 }
 
 async function getCalendarConfig() {
@@ -129,9 +143,10 @@ export async function runSync() {
 
   console.log('Eventos en el feed ICS tras filtro:', vevents.length);
 
+  const seenHandles = new Set();
+
   const occ = vevents.map(ev => {
-    const base = ev.uid ? String(ev.uid) : (ev.summary || 'evento');
-    const handle = toHandle(base);
+    const handle = uniqueHandleFor(ev, seenHandles);
     return {
       handle,
       title: ev.summary || '',
