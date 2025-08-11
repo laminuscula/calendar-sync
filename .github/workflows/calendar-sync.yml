@@ -1,0 +1,44 @@
+name: Calendar Sync
+
+on:
+  schedule:
+    # Ejecuta cada 30 minutos (horario UTC)
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+# Evita ejecuciones solapadas
+concurrency:
+  group: calendar-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run calendar sync
+        env:
+          SHOPIFY_STORE_DOMAIN: ${{ secrets.SHOPIFY_STORE_DOMAIN }}
+          SHOPIFY_ADMIN_TOKEN:  ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          ICS_URL:              ${{ secrets.ICS_URL }}
+          LOOKAHEAD_DAYS:       ${{ secrets.LOOKAHEAD_DAYS }}
+          HTTP_TIMEOUT_MS:      ${{ secrets.HTTP_TIMEOUT_MS }}
+          HTTP_RETRIES:         ${{ secrets.HTTP_RETRIES }}
+        run: |
+          node -e "import('./src/sync-core.mjs')
+            .then(m => m.runSync())
+            .then(r => { console.log(r || 'OK'); })
+            .catch(err => { console.error(err); process.exit(1); })"
