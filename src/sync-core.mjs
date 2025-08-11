@@ -72,7 +72,12 @@ async function getCalendarConfig() {
 
 const MUT_CREATE = `
 mutation Create($handle:String!, $fields:[MetaobjectFieldInput!]!) {
-  metaobjectCreate(metaobject:{ type:"${META_TYPE}", handle:$handle, status: ACTIVE, fields:$fields }) {
+  metaobjectCreate(metaobject:{
+    type:"${META_TYPE}",
+    handle:$handle,
+    fields:$fields,
+    capabilities:{ publishable:{ status: ACTIVE } }
+  }) {
     metaobject { id handle }
     userErrors { field message code }
   }
@@ -80,7 +85,10 @@ mutation Create($handle:String!, $fields:[MetaobjectFieldInput!]!) {
 
 const MUT_UPDATE = `
 mutation Update($id:ID!, $fields:[MetaobjectFieldInput!]!) {
-  metaobjectUpdate(id:$id, metaobject:{ status: ACTIVE, fields:$fields }) {
+  metaobjectUpdate(id:$id, metaobject:{
+    fields:$fields,
+    capabilities:{ publishable:{ status: ACTIVE } }
+  }) {
     metaobject { id handle }
     userErrors { field message code }
   }
