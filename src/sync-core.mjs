@@ -9,7 +9,7 @@ const META_TYPE = 'event';
 async function shopifyGraphQL(query, variables = {}) {
   const res = await fetch(shopifyEndpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': shopifyToken },
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Access-Token': shopifyToken, 'X-Shopify-Access-Token': shopifyToken },
     body: JSON.stringify({ query, variables })
   });
   const json = await res.json();
@@ -21,7 +21,7 @@ async function shopifyGraphQL(query, variables = {}) {
 }
 
 function toHandle(str) {
-  return (str || '')
+  return (str || 'evento')
     .toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
@@ -64,8 +64,7 @@ async function getCalendarConfig() {
   const lookaheadFromType = byType?.metaobjects?.nodes?.[0]?.lookahead_days?.value || null;
 
   const ics = icsFromId || icsFromType || process.env.ICS_URL || null;
-  const lookahead =
-    Number(lookaheadFromId || lookaheadFromType || process.env.LOOKAHEAD_DAYS || 180);
+  const lookahead = Number(lookaheadFromId || lookaheadFromType || process.env.LOOKAHEAD_DAYS || 180);
 
   return { ics, lookahead };
 }
