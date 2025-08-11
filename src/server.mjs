@@ -6,6 +6,8 @@ import { runSync } from './sync-core.mjs'; // tu función actual
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+let running = false;
+
 // Utiliza SYNC_SECRET por defecto; admite HMAC_SECRET por compatibilidad
 function getSecret() {
   return process.env.SYNC_SECRET || process.env.HMAC_SECRET || '';
@@ -20,19 +22,26 @@ function verifyHmac(req) {
   return fromQuery && fromQuery === calc;
 }
 
-app.get('/sync', async (req, res) => {
+app.get('/sync', (req, res) => {
   if (!verifyHmac(req)) return res.status(401).json({ ok:false, error:'unauthorized' });
   const quiet = req.query.quiet === '1';
 
-  try {
-    await runSync();
-    if (quiet) return res.status(200).send('OK'); // respuesta mínima para cron-job.org
-    return res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    if (quiet) return res.status(500).send('ERROR');
-    return res.status(500).json({ ok:false, error: e.message });
+  // Responder inmediatamente para evitar timeouts en cron-job.org
+  if (quiet) {
+    res.status(200).send('OK');
+  } else {
+    res.json({ ok: true, started: true });
   }
+
+  // Evitar solapes: si ya hay una sync en marcha, no lanzamos otra
+  if (running) return;
+  running = true;
+
+  // Ejecutar la sincronización en segundo plano (no bloquea la respuesta)
+  Promise.resolve()
+    .then(() => runSync())
+    .catch((e) => console.error('runSync error:', e))
+    .finally(() => { running = false; });
 });
 
 // Endpoint de diagnóstico temporal para confirmar el HMAC calculado por el servidor
