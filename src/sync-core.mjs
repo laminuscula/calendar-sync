@@ -30,7 +30,6 @@ function toHandle(str) {
 }
 
 function uniqueHandleFor(ev, seen) {
-  // seen: Set with handles already assigned in this sync pass
   const base = toHandle(ev.uid ? String(ev.uid) : (ev.summary || 'evento'));
   let handle = base;
   if (seen.has(handle)) {
@@ -190,4 +189,5 @@ export async function runSync() {
   }
 
   console.log('Sincronización completada');
+  return 'OK';
 }

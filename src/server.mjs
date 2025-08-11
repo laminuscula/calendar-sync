@@ -26,11 +26,11 @@ app.get('/sync', async (req, res) => {
 
   try {
     await runSync();
-    if (quiet) return res.status(204).end(); // sin cuerpo para cron-job.org
+    if (quiet) return res.status(200).send('OK'); // respuesta mínima para cron-job.org
     return res.json({ ok: true });
   } catch (e) {
     console.error(e);
-    if (quiet) return res.status(500).end();
+    if (quiet) return res.status(500).send('ERROR');
     return res.status(500).json({ ok:false, error: e.message });
   }
 });
