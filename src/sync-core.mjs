@@ -5,19 +5,52 @@ import fetch from 'node-fetch';
 const shopifyEndpoint = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-07/graphql.json`;
 const shopifyToken = process.env.SHOPIFY_ADMIN_TOKEN;
 const META_TYPE = 'event';
+const HTTP_TIMEOUT_MS = Number(process.env.HTTP_TIMEOUT_MS || 12000);
+const HTTP_RETRIES = Number(process.env.HTTP_RETRIES || 2);
 
-async function shopifyGraphQL(query, variables = {}) {
-  const res = await fetch(shopifyEndpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': shopifyToken },
-    body: JSON.stringify({ query, variables })
-  });
-  const json = await res.json();
-  if (!res.ok || json.errors) {
-    console.error('Shopify GraphQL errors:', JSON.stringify(json.errors || json, null, 2));
-    throw new Error('Shopify GraphQL error');
+/** Utilidad: fetch con timeout y reintentos (texto) */
+async function fetchTextWithTimeout(url, { timeout = HTTP_TIMEOUT_MS, retries = HTTP_RETRIES, headers = {} } = {}) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const to = setTimeout(() => controller.abort(), timeout);
+    try {
+      const res = await fetch(url, { signal: controller.signal, headers });
+      clearTimeout(to);
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      return await res.text();
+    } catch (err) {
+      clearTimeout(to);
+      if (attempt === retries) throw err;
+      // backoff lineal: 1s, 2s, 3s...
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+    }
   }
-  return json.data;
+  throw new Error('unreachable');
+}
+
+/** Shopify GraphQL con timeout */
+async function shopifyGraphQL(query, variables = {}) {
+  const controller = new AbortController();
+  const to = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
+  try {
+    const res = await fetch(shopifyEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': shopifyToken
+      },
+      body: JSON.stringify({ query, variables }),
+      signal: controller.signal
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json.errors) {
+      console.error('Shopify GraphQL errors:', JSON.stringify(json.errors || json, null, 2));
+      throw new Error('Shopify GraphQL error');
+    }
+    return json.data;
+  } finally {
+    clearTimeout(to);
+  }
 }
 
 function toHandle(str) {
@@ -129,16 +162,19 @@ export async function runSync() {
   const currentMap = new Map(currentNodes.map(n => [n.handle, n.id]));
   console.log('Eventos actuales en Shopify:', currentNodes.length);
 
+  // Descargar ICS con timeout y reintentos
   const icsUrl = cfg.ics + (cfg.ics.includes('?') ? '&' : '?') + 't=' + Date.now();
   console.log('Descargando feed ICS');
-  const parsed = await ical.async.fromURL(icsUrl);
+  const icsText = await fetchTextWithTimeout(icsUrl);
+  const parsed = ical.parseICS(icsText);
 
   const now = new Date();
   const futureLimit = new Date(now.getTime() + cfg.lookahead * 24 * 60 * 60 * 1000);
 
   const vevents = Object.values(parsed)
     .filter(ev => ev && ev.type === 'VEVENT')
-    .filter(ev => ev.start && ev.start >= now && ev.start <= futureLimit);
+    .filter(ev => ev.start && ev.start >= now && ev.start <= futureLimit)
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
 
   console.log('Eventos en el feed ICS tras filtro:', vevents.length);
 
@@ -159,6 +195,7 @@ export async function runSync() {
   const newHandles = occ.map(e => e.handle);
   console.log('Eventos a procesar:', occ.length);
 
+  // Mutaciones Shopify (si falla una, seguimos con las demás; registramos el error)
   for (const ev of occ) {
     const fields = [
       { key: 'title', value: ev.title || '' },
@@ -169,23 +206,31 @@ export async function runSync() {
     if (ev.end_iso) fields.push({ key: 'end_date', value: ev.end_iso });
 
     const existingId = currentMap.get(ev.handle);
-    if (existingId) {
-      const out = await shopifyGraphQL(MUT_UPDATE, { id: existingId, fields });
-      const errs = out?.metaobjectUpdate?.userErrors || [];
-      if (errs.length) throw new Error('userErrors update: ' + JSON.stringify(errs));
-    } else {
-      const out = await shopifyGraphQL(MUT_CREATE, { handle: ev.handle, fields });
-      const errs = out?.metaobjectCreate?.userErrors || [];
-      if (errs.length) throw new Error('userErrors create: ' + JSON.stringify(errs));
+    try {
+      if (existingId) {
+        const out = await shopifyGraphQL(MUT_UPDATE, { id: existingId, fields });
+        const errs = out?.metaobjectUpdate?.userErrors || [];
+        if (errs.length) console.error('userErrors update:', JSON.stringify(errs));
+      } else {
+        const out = await shopifyGraphQL(MUT_CREATE, { handle: ev.handle, fields });
+        const errs = out?.metaobjectCreate?.userErrors || [];
+        if (errs.length) console.error('userErrors create:', JSON.stringify(errs));
+      }
+    } catch (e) {
+      console.error(`Error procesando ${ev.handle}:`, e.message);
     }
   }
 
   const toDelete = currentNodes.filter(n => !newHandles.includes(n.handle));
   console.log('Eventos a borrar:', toDelete.length);
   for (const n of toDelete) {
-    const out = await shopifyGraphQL(MUT_DELETE, { id: n.id });
-    const errs = out?.metaobjectDelete?.userErrors || [];
-    if (errs.length) throw new Error('userErrors delete: ' + JSON.stringify(errs));
+    try {
+      const out = await shopifyGraphQL(MUT_DELETE, { id: n.id });
+      const errs = out?.metaobjectDelete?.userErrors || [];
+      if (errs.length) console.error('userErrors delete:', JSON.stringify(errs));
+    } catch (e) {
+      console.error(`Error borrando ${n.id}:`, e.message);
+    }
   }
 
   console.log('Sincronización completada');
